@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/pando_scripts.dart';
-import '../data/properties.dart';
+import '../providers/property_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pando_character.dart';
 import '../widgets/pando_provider.dart';
@@ -31,7 +31,9 @@ class _SavedScreenState extends State<SavedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final saved = mockProperties.where((p) => widget.savedIds.contains(p.id)).toList();
+    final provider = context.watch<PropertyProvider>();
+    final allProperties = provider.properties;
+    final saved = allProperties.where((p) => widget.savedIds.contains(p.id)).toList();
     return Stack(
       children: [
         SafeArea(
@@ -43,7 +45,30 @@ class _SavedScreenState extends State<SavedScreen> {
                 child: Text('Saved', style: AppText.serif(size: 26)),
               ),
               Expanded(
-                child: saved.isEmpty
+                child: widget.savedIds.isNotEmpty && allProperties.isEmpty && provider.hasError
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.wifi_off_rounded, size: 44, color: AppColors.muted),
+                              const SizedBox(height: 12),
+                              Text(provider.errorMessage, textAlign: TextAlign.center, style: AppText.sans(size: 13, color: AppColors.muted)),
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.red,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.pill)),
+                                ),
+                                onPressed: () => provider.fetchProperties(refresh: true),
+                                child: Text('Retry', style: AppText.sans(color: Colors.white, weight: FontWeight.w700)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    : saved.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),

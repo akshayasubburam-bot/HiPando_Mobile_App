@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../providers/property_provider.dart';
 import '../widgets/bottom_nav.dart';
 import 'explore_screen.dart';
 import 'home_screen.dart';
@@ -21,6 +23,16 @@ class _RootShellState extends State<RootShell> {
   String? _searchQuery;
   final Set<String> _savedIds = {};
   bool _signedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pre-fetch properties so listings are ready when the user opens the Search tab.
+    // All users — signed-in or guest — can browse as buyers in this milestone.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<PropertyProvider>().fetchProperties();
+    });
+  }
 
   void _goToSearch(String query) {
     setState(() {
@@ -48,10 +60,16 @@ class _RootShellState extends State<RootShell> {
       context,
       MaterialPageRoute(
         builder: (_) => SignInScreen(
-          onVerified: () => setState(() {
-            _signedIn = true;
-            _index = 4;
-          }),
+          onVerified: () {
+            // Set the buyer role in PropertyProvider when sign-in completes.
+            // NOTE: this is a development convenience — real role enforcement
+            // is always performed server-side.
+            context.read<PropertyProvider>().setBuyerRole();
+            setState(() {
+              _signedIn = true;
+              _index = 4;
+            });
+          },
         ),
       ),
     );
@@ -71,7 +89,10 @@ class _RootShellState extends State<RootShell> {
       SavedScreen(savedIds: _savedIds, onToggleSave: _toggleSave),
       ProfileScreen(
         signedIn: _signedIn,
-        onSignOut: () => setState(() => _signedIn = false),
+        onSignOut: () {
+          context.read<PropertyProvider>().clearRole();
+          setState(() => _signedIn = false);
+        },
       ),
     ];
 
@@ -87,3 +108,4 @@ class _RootShellState extends State<RootShell> {
     );
   }
 }
+

@@ -4,8 +4,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../data/pando_scripts.dart';
-import '../data/properties.dart';
 import '../models/property.dart';
+import '../providers/property_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pando_character.dart';
 import '../widgets/pando_provider.dart';
@@ -59,11 +59,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
   }
 
   void _announce() {
-    context.read<PandoProvider>().speak(PandoScripts.mapOverview(_filtered, _typeFilter?.label));
+    final all = context.read<PropertyProvider>().properties;
+    context.read<PandoProvider>().speak(PandoScripts.mapOverview(_filtered(all), _typeFilter?.label));
   }
 
-  List<Property> get _filtered {
-    var results = mockProperties.toList();
+  List<Property> _filtered(List<Property> all) {
+    var results = all.toList();
     switch (_category) {
       case 0:
         results = results.where((p) => p.purpose == PropertyPurpose.buy).toList();
@@ -89,7 +90,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   void _selectIndex(int i, {bool fromMarker = false}) {
     setState(() => _selected = i);
-    final results = _filtered;
+    final all = context.read<PropertyProvider>().properties;
+    final results = _filtered(all);
     if (i >= results.length) return;
     final p = results[i];
     _mapController.move(LatLng(p.lat, p.lng), _mapController.camera.zoom < 11 ? 12 : _mapController.camera.zoom);
@@ -114,7 +116,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final results = _filtered;
+    final provider = context.watch<PropertyProvider>();
+    final results = _filtered(provider.properties);
     if (_selected >= results.length) _selected = 0;
 
     return Stack(
@@ -342,11 +345,21 @@ class _ExploreScreenState extends State<ExploreScreen> {
             padding: const EdgeInsets.only(bottom: 12),
             child: SizedBox(
               height: 92,
-              child: results.isEmpty
-                  ? Center(
-                      child: Text('No properties match this filter.', style: AppText.sans(size: 12.5, color: AppColors.muted)),
-                    )
-                  : PageView.builder(
+              child: provider.isLoading && provider.properties.isEmpty
+                  ? const Center(child: CircularProgressIndicator(color: AppColors.red))
+                  : provider.hasError && provider.properties.isEmpty
+                      ? Center(
+                          child: Text(
+                            provider.errorMessage,
+                            textAlign: TextAlign.center,
+                            style: AppText.sans(size: 12.5, color: AppColors.muted),
+                          ),
+                        )
+                      : results.isEmpty
+                          ? Center(
+                              child: Text('No properties match this filter.', style: AppText.sans(size: 12.5, color: AppColors.muted)),
+                            )
+                          : PageView.builder(
                       controller: _pageController,
                       itemCount: results.length,
                       onPageChanged: (i) => _selectIndex(i),

@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/pando_scripts.dart';
-import '../data/properties.dart';
 import '../models/property.dart';
+import '../providers/property_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/pando_ask_box.dart';
 import '../widgets/pando_character.dart';
@@ -34,36 +34,57 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final _scrollController = ScrollController();
   int _visibleIndex = 0;
-  List<Property> _results = [];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final query = widget.initialQuery?.toLowerCase().trim() ?? '';
-      _results = query.isEmpty
-          ? mockProperties
-          : mockProperties
-              .where((p) =>
-                  p.community.toLowerCase().contains(query) ||
-                  p.type.toLowerCase().contains(query) ||
-                  p.title.toLowerCase().contains(query))
-              .toList();
-      context.read<PandoProvider>().speak(PandoScripts.searchListOverview(_results));
-    });
     _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<PropertyProvider>();
+      if (provider.status == FetchStatus.idle) {
+        provider.fetchProperties();
+      }
+      _announceCurrentResults(provider.properties);
+    });
+  }
+
+  void _announceCurrentResults(List<Property> results) {
+    final filtered = _applyQuery(results);
+    context.read<PandoProvider>().speak(PandoScripts.searchListOverview(filtered));
   }
 
   void _onScroll() {
-    if (_results.isEmpty) return;
+    final provider = context.read<PropertyProvider>();
+    final results = _applyQuery(provider.properties);
+    if (results.isEmpty) return;
+
     const cardHeight = 430.0;
-    final index = (_scrollController.offset / cardHeight).round().clamp(0, _results.length - 1);
+    final index = (_scrollController.offset / cardHeight)
+        .round()
+        .clamp(0, results.length - 1);
     if (index != _visibleIndex) {
       setState(() => _visibleIndex = index);
       final pando = context.read<PandoProvider>();
-      pando.rememberCommunity(_results[index].community);
-      pando.speak(PandoScripts.searchCardFocus(_results[index]));
+      pando.rememberCommunity(results[index].community);
+      pando.speak(PandoScripts.searchCardFocus(results[index]));
     }
+
+    // Infinite scroll — load next page when near the bottom
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 400) {
+      context.read<PropertyProvider>().fetchNextPage();
+    }
+  }
+
+  List<Property> _applyQuery(List<Property> all) {
+    final query = widget.initialQuery?.toLowerCase().trim() ?? '';
+    if (query.isEmpty) return all;
+    return all
+        .where((p) =>
+            p.community.toLowerCase().contains(query) ||
+            p.type.toLowerCase().contains(query) ||
+            p.title.toLowerCase().contains(query))
+        .toList();
   }
 
   @override
@@ -74,17 +95,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final query = widget.initialQuery?.toLowerCase().trim() ?? '';
-    final results = query.isEmpty
-        ? mockProperties
-        : mockProperties
-              .where(
-                (p) =>
-                    p.community.toLowerCase().contains(query) ||
-                    p.type.toLowerCase().contains(query) ||
-                    p.title.toLowerCase().contains(query),
-              )
-              .toList();
+    final provider = context.watch<PropertyProvider>();
+    final results  = _applyQuery(provider.properties);
+    final query    = widget.initialQuery?.toLowerCase().trim() ?? '';
 
     return Stack(
       children: [
@@ -158,33 +171,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             Expanded(
-              child: results.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No matches for "$query" yet.',
-                        style: AppText.sans(color: AppColors.muted),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.only(top: 8, bottom: 220),
-                      itemCount: results.length,
-                      itemBuilder: (context, i) {
-                        final p = results[i];
-                        return PropertyCard(
-                          property: p,
-                          saved: widget.savedIds.contains(p.id),
-                          onBookmarkTap: () => widget.onToggleSave(p.id),
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  PropertyDetailsScreen(property: p),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+              child: _buildBody(provider, results, query),
             ),
           ],
         ),
@@ -207,6 +194,87 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildBody(
+      PropertyProvider provider, List<Property> results, String query) {
+    // First load — no data yet
+    if (provider.isLoading && provider.properties.isEmpty) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.red));
+    }
+
+    // Error with no data to fall back on
+    if (provider.hasError && provider.properties.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off_rounded,
+                  size: 48, color: AppColors.muted),
+              const SizedBox(height: 12),
+              Text(
+                provider.errorMessage,
+                textAlign: TextAlign.center,
+                style: AppText.sans(color: AppColors.muted),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.red,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.pill)),
+                ),
+                onPressed: () => provider.fetchProperties(refresh: true),
+                child: Text('Retry',
+                    style: AppText.sans(
+                        color: Colors.white, weight: FontWeight.w700)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (results.isEmpty) {
+      return Center(
+        child: Text(
+          query.isEmpty
+              ? 'No properties available yet.'
+              : 'No matches for "$query" yet.',
+          style: AppText.sans(color: AppColors.muted),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.only(top: 8, bottom: 220),
+      itemCount: results.length + (provider.hasMore ? 1 : 0),
+      itemBuilder: (context, i) {
+        if (i == results.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child:
+                Center(child: CircularProgressIndicator(color: AppColors.red)),
+          );
+        }
+        final p = results[i];
+        return PropertyCard(
+          property: p,
+          saved: widget.savedIds.contains(p.id),
+          onBookmarkTap: () => widget.onToggleSave(p.id),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PropertyDetailsScreen(property: p),
+            ),
+          ),
+        );
+      },
     );
   }
 }
